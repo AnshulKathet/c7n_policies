@@ -1,0 +1,45 @@
+---
+stages:
+- custodian
+- reports
+custodian policies:
+  stage: custodian
+  image:
+    name: cloudcustodian/c7n-org
+    # We override the entrypoint of the docker image so that we can run the script below
+    entrypoint: [""]
+  # Run the job only when it's a scheduled by Gitlab
+  only:
+  - schedules
+  script: | 
+    # Find policies with the specified frequency
+    for POLICY_PATH in $(find policies/* -type f -mindepth 2 -maxdepth 2 -name \*.yml | grep /$FREQUENCY_TYPE/)
+    # For daily jobs it should return (nonprod/daily/daily-nonprod-policy.yml and nonprod/daily/another-daily-nonprod-policy.yml)
+    do
+      # extract "nonprod" type from filename
+      ACCOUNT=$(echo $POLICY_PATH | cut -f2 -d/)
+      c7n-org run -s output \
+      -c accounts.yml \
+      -u $POLICY_PATH \
+      # specify the accounts tag that we want to target from accounts.yml - here it will be nonprod
+      -t type:$ACCOUNT \
+      --region eu-west-1
+    done
+  # Store the output in a Gitlab artifact just in case
+  artifacts:
+    name: custodian-reports
+    expire_in: 1 week
+    paths:
+      - output
+custodian mailer:
+  stage: reports
+  image:
+    name: cloudcustodian/mailer
+    # Same here we override the entrypoint
+    entrypoint: [""]
+  only:
+  - schedules
+  script: |
+    # Run the command in order to send the reports
+    c7n-mailer --run \
+    -c mailer.yml
